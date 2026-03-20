@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Visitor Insights</title>
+  <style>
+    :root {
+      --bg: #07080d;
+      --panel: #111321;
+      --muted: #98a1b3;
+      --text: #eef2f8;
+      --accent: #7ff24e;
+      --line: #2a2e46;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Segoe UI", Arial, sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 14% 12%, rgba(127, 242, 78, 0.12), transparent 30%),
+        radial-gradient(circle at 82% 20%, rgba(68, 132, 255, 0.16), transparent 35%),
+        var(--bg);
+      padding: 1.25rem;
+    }
+
+    .wrap {
+      width: min(980px, 100%);
+      margin: 0 auto;
+      display: grid;
+      gap: 1rem;
+    }
+
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: linear-gradient(160deg, rgba(19, 22, 37, 0.94), rgba(13, 15, 25, 0.94));
+      box-shadow: 0 18px 40px rgba(0, 0, 0, 0.34);
+      padding: 1rem;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(1.4rem, 2.3vw, 2rem);
+      letter-spacing: 0.01em;
+    }
+
+    .muted {
+      color: var(--muted);
+      font-size: 0.92rem;
+      margin-top: 0.35rem;
+    }
+
+    .row {
+      display: flex;
+      gap: 0.65rem;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    input {
+      background: #090c16;
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 0.62rem 0.74rem;
+      min-width: 240px;
+      outline: none;
+    }
+
+    button {
+      border: 0;
+      border-radius: 10px;
+      padding: 0.62rem 0.95rem;
+      background: linear-gradient(180deg, #95ff68, #68cf3e);
+      color: #12210b;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .danger {
+      background: linear-gradient(180deg, #ff8f8f, #f05454);
+      color: #2a0b0b;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 0.7rem;
+    }
+
+    .stat {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 0.75rem;
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .stat .label { color: var(--muted); font-size: 0.8rem; }
+    .stat .val { font-size: 1.3rem; font-weight: 800; margin-top: 0.2rem; }
+
+    .section {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 0.82rem;
+      margin-top: 0.6rem;
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .section h3 {
+      margin: 0;
+      color: var(--accent);
+      font-size: 1rem;
+    }
+
+    .section p {
+      margin: 0.35rem 0 0;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+
+    ul {
+      margin: 0.55rem 0 0;
+      padding-left: 1.1rem;
+      display: grid;
+      gap: 0.25rem;
+      font-size: 0.9rem;
+    }
+
+    .warn {
+      color: #ffd486;
+      font-size: 0.86rem;
+      margin-top: 0.55rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="panel">
+      <h1>Secret Visitor Insights</h1>
+      <p class="muted">Long-press Download button opens this page. Enter password to view Home + section visits.</p>
+      <div class="row" style="margin-top:0.8rem;">
+        <input id="password" type="password" placeholder="Enter password" />
+        <button id="loadBtn">Load Details</button>
+        <button id="clearBtn" class="danger" type="button">Clear Data</button>
+      </div>
+      <p id="status" class="muted"></p>
+    </section>
+
+    <section id="output" class="panel" hidden>
+      <div class="stats">
+        <div class="stat">
+          <div class="label">Total Visits</div>
+          <div id="totalVisits" class="val">0</div>
+        </div>
+        <div class="stat">
+          <div class="label">Unique Visitors</div>
+          <div id="uniqueVisitors" class="val">0</div>
+        </div>
+      </div>
+      <p id="note" class="warn"></p>
+      <div id="sections"></div>
+    </section>
+  </div>
+
+  <script>
+    const passwordInput = document.getElementById("password");
+    const loadBtn = document.getElementById("loadBtn");
+    const clearBtn = document.getElementById("clearBtn");
+    const status = document.getElementById("status");
+    const output = document.getElementById("output");
+    const totalVisits = document.getElementById("totalVisits");
+    const uniqueVisitors = document.getElementById("uniqueVisitors");
+    const sectionsEl = document.getElementById("sections");
+    const noteEl = document.getElementById("note");
+    const LOCAL_VISITS_KEY = "kr_local_visits";
+
+    function escapeHtml(text) {
+      return String(text)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function normalizeSection(section) {
+      return String(section || "Home")
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/(^-|-$)/g, "") || "home";
+    }
+
+    function buildView(visits) {
+      const ipToUser = new Map();
+      let userCounter = 1;
+      const sections = new Map();
+
+      for (const visit of visits) {
+        const ip = String(visit.ip || "unknown");
+        if (!ipToUser.has(ip)) {
+          ipToUser.set(ip, `user${userCounter}`);
+          userCounter += 1;
+        }
+
+        const sectionKey = visit.sectionKey || normalizeSection(visit.section);
+        if (!sections.has(sectionKey)) {
+          sections.set(sectionKey, {
+            section: visit.section || "Home",
+            count: 0,
+            users: new Map(),
+          });
+        }
+
+        const bucket = sections.get(sectionKey);
+        bucket.count += 1;
+
+        if (!bucket.users.has(ip)) {
+          bucket.users.set(ip, {
+            ip,
+            user: ipToUser.get(ip),
+            count: 0,
+          });
+        }
+
+        bucket.users.get(ip).count += 1;
+      }
+
+      const sectionList = Array.from(sections.values()).map((entry) => ({
+        section: entry.section,
+        count: entry.count,
+        visitors: Array.from(entry.users.values()).sort((a, b) => b.count - a.count),
+      })).sort((a, b) => b.count - a.count);
+
+      return {
+        totalVisits: visits.length,
+        uniqueVisitors: ipToUser.size,
+        sections: sectionList,
+        note: "Running in local mode. Data is stored in this browser only.",
+      };
+    }
+
+    function renderView(data) {
+      totalVisits.textContent = String(data.totalVisits || 0);
+      uniqueVisitors.textContent = String(data.uniqueVisitors || 0);
+      noteEl.textContent = data.note || "";
+
+      const blocks = (data.sections || []).map((entry) => {
+        const visitors = (entry.visitors || []).map((v) => (
+          `<li>${escapeHtml(v.ip)} - ${escapeHtml(v.user)} (${v.count} visits)</li>`
+        )).join("");
+
+        return `
+          <article class="section">
+            <h3>${escapeHtml(entry.section)} visit: ${entry.count}</h3>
+            <p>IPs / users:</p>
+            <ul>${visitors || "<li>No visitor data</li>"}</ul>
+          </article>
+        `;
+      }).join("");
+
+      sectionsEl.innerHTML = blocks || "<p class='muted'>No section visits yet.</p>";
+      output.hidden = false;
+    }
+
+    function loadFromLocal() {
+      const raw = window.localStorage.getItem(LOCAL_VISITS_KEY) || "[]";
+      const visits = JSON.parse(raw);
+      return buildView(Array.isArray(visits) ? visits : []);
+    }
+
+    async function loadDetails() {
+      const password = passwordInput.value.trim();
+      if (!password) {
+        status.textContent = "Enter password first.";
+        return;
+      }
+
+      status.textContent = "Loading...";
+      output.hidden = true;
+
+      try {
+        const response = await fetch(`/api/visits?password=${encodeURIComponent(password)}`);
+        const data = await response.json();
+
+        if (!response.ok || !data.ok) {
+          status.textContent = data.message || "Unable to load visitor details.";
+          return;
+        }
+
+        renderView(data);
+        status.textContent = "Loaded successfully.";
+      } catch {
+        const local = loadFromLocal();
+        renderView(local);
+        status.textContent = "API unavailable. Loaded local browser data.";
+      }
+    }
+
+    async function clearDetails() {
+      const password = passwordInput.value.trim();
+      if (!password) {
+        status.textContent = "Enter password first.";
+        return;
+      }
+
+      const shouldClear = window.confirm("Are you sure you want to clear all visit data?");
+      if (!shouldClear) return;
+
+      status.textContent = "Clearing...";
+
+      try {
+        const response = await fetch("/api/clear-visits", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password }),
+        });
+        const data = await response.json();
+
+        if (!response.ok || !data.ok) {
+          status.textContent = data.message || "Unable to clear visitor data.";
+          return;
+        }
+
+        status.textContent = "All visit data cleared.";
+        await loadDetails();
+      } catch {
+        window.localStorage.removeItem(LOCAL_VISITS_KEY);
+        status.textContent = "API unavailable. Cleared local browser data.";
+        await loadDetails();
+      }
+    }
+
+    loadBtn.addEventListener("click", loadDetails);
+    clearBtn.addEventListener("click", clearDetails);
+    passwordInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") loadDetails();
+    });
+  </script>
+</body>
+</html>

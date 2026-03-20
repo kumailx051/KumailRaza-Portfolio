@@ -14,6 +14,50 @@ const QUICKHELP_SLIDES = Object.entries(
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
 function easeIO(t) { return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; }
 
+const LOCAL_VISITS_KEY = "kr_local_visits";
+
+function normalizeSection(section) {
+  return String(section || "Home")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "") || "home";
+}
+
+function storeLocalVisit(section) {
+  if (typeof window === "undefined") return;
+
+  try {
+    const current = JSON.parse(window.localStorage.getItem(LOCAL_VISITS_KEY) || "[]");
+    const next = [{
+      section: String(section || "Home"),
+      sectionKey: normalizeSection(section),
+      ip: "local-device",
+      ua: window.navigator?.userAgent || "unknown",
+      timestamp: new Date().toISOString(),
+    }, ...current].slice(0, 1000);
+
+    window.localStorage.setItem(LOCAL_VISITS_KEY, JSON.stringify(next));
+  } catch {
+    // Ignore local analytics failures.
+  }
+}
+
+function trackSectionVisit(section) {
+  try {
+    fetch("/api/track", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ section }),
+      keepalive: true,
+    }).catch(() => {
+      storeLocalVisit(section);
+    });
+  } catch {
+    storeLocalVisit(section);
+  }
+}
+
 /* ────── 3D Card Carousel ────── */
 function Carousel({ cards, centerIdx, visible, onCardClick }) {
   return (
@@ -1531,6 +1575,19 @@ export default function App() {
   const touchHasStarted = useRef(false);
   const suppressTapRef = useRef(false);
   const tapUnlockTimerRef = useRef(null);
+  const longPressTimerRef = useRef(null);
+  const didLongPressRef = useRef(false);
+
+  useEffect(() => {
+    trackSectionVisit("Home");
+  }, []);
+
+  useEffect(() => {
+    if (openCard === null) return;
+    const card = cards[openCard];
+    const sectionName = card?.sectionTitle || card?.label || `Section-${openCard + 1}`;
+    trackSectionVisit(sectionName);
+  }, [openCard]);
 
   // Scroll ONLY moves cards (when not inside a card)
   useEffect(() => {
@@ -1622,6 +1679,30 @@ export default function App() {
   const isZoomed = openCard !== null;
   const activeCard = isZoomed ? openCard : centerIdx;
 
+  const handleDownloadPressStart = useCallback(() => {
+    didLongPressRef.current = false;
+    if (longPressTimerRef.current) window.clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = window.setTimeout(() => {
+      didLongPressRef.current = true;
+      window.open("/admin.html", "_blank", "noopener,noreferrer");
+    }, 800);
+  }, []);
+
+  const handleDownloadPressEnd = useCallback(() => {
+    if (longPressTimerRef.current) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  }, []);
+
+  const handleDownloadClick = useCallback((e) => {
+    if (!didLongPressRef.current) return;
+    e.preventDefault();
+    window.setTimeout(() => {
+      didLongPressRef.current = false;
+    }, 0);
+  }, []);
+
   return (
     <div className="page">
       <div className="grain" aria-hidden />
@@ -1661,7 +1742,16 @@ export default function App() {
         </div>
 
         {/* CTA */}
-        <a className={`cta${isZoomed ? " hidden" : ""}`} href={resumePdf} download="Kumail Raza CV.pdf">
+        <a
+          className={`cta${isZoomed ? " hidden" : ""}`}
+          href={resumePdf}
+          download="Kumail Raza CV.pdf"
+          onPointerDown={handleDownloadPressStart}
+          onPointerUp={handleDownloadPressEnd}
+          onPointerLeave={handleDownloadPressEnd}
+          onPointerCancel={handleDownloadPressEnd}
+          onClick={handleDownloadClick}
+        >
           Download Resume
         </a>
       </div>
