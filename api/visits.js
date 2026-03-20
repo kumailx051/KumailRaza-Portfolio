@@ -92,8 +92,8 @@ export default async function handler(req, res) {
       persisted: data.persisted,
       ...view,
       note: data.persisted
-        ? "Data is persisted in KV storage."
-        : "Running with memory fallback only. Add KV_REST_API_URL and KV_REST_API_TOKEN for persistence.",
+        ? "Data is persisted in server storage (KV/Blob)."
+        : "Running with memory fallback only. Configure KV or Blob storage for persistence.",
     });
   } catch {
     return res.status(500).json({ ok: false, message: "Failed to load visits" });

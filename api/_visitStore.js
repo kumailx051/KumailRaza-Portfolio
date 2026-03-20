@@ -1,9 +1,16 @@
+import { del, list, put } from "@vercel/blob";
+
 const MAX_VISITS = 1000;
 const STORE_KEY = "__KR_VISIT_STORE__";
 const ALL_KEY = "kr:visits:all";
+const BLOB_PREFIX = "visits/";
 
 function hasRedis() {
   return Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
+}
+
+function hasBlob() {
+  return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
 }
 
 function getMemoryStore() {
@@ -58,6 +65,16 @@ export async function addVisit(visit) {
     return { persisted: true, record };
   }
 
+  if (hasBlob()) {
+    const random = Math.random().toString(36).slice(2, 10);
+    const pathname = `${BLOB_PREFIX}${record.timestamp}-${random}.json`;
+    await put(pathname, JSON.stringify(record), {
+      access: "public",
+      addRandomSuffix: false,
+    });
+    return { persisted: true, record };
+  }
+
   const store = getMemoryStore();
   store.all.unshift(record);
   if (store.all.length > MAX_VISITS) store.all.length = MAX_VISITS;
@@ -77,6 +94,33 @@ export async function getAllVisits() {
           return null;
         }
       }).filter(Boolean),
+    };
+  }
+
+  if (hasBlob()) {
+    const blobs = await list({ prefix: BLOB_PREFIX, limit: MAX_VISITS });
+    const visits = [];
+
+    for (const blob of blobs.blobs || []) {
+      try {
+        const response = await fetch(blob.url);
+        if (!response.ok) continue;
+        const record = await response.json();
+        visits.push(record);
+      } catch {
+        // Ignore malformed/unavailable blob records.
+      }
+    }
+
+    visits.sort((a, b) => {
+      const ta = new Date(a?.timestamp || 0).getTime();
+      const tb = new Date(b?.timestamp || 0).getTime();
+      return tb - ta;
+    });
+
+    return {
+      persisted: true,
+      visits: visits.slice(0, MAX_VISITS),
     };
   }
 
@@ -101,6 +145,15 @@ export async function clearAllVisits() {
     });
 
     await redisPipeline(Array.from(keys).map((key) => ["DEL", key]));
+    return { persisted: true, cleared: true };
+  }
+
+  if (hasBlob()) {
+    const blobs = await list({ prefix: BLOB_PREFIX, limit: MAX_VISITS });
+    const urls = (blobs.blobs || []).map((blob) => blob.url);
+    if (urls.length) {
+      await del(urls);
+    }
     return { persisted: true, cleared: true };
   }
 
